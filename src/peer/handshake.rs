@@ -1,16 +1,11 @@
 use std::io::{self, Read, Write};
-use super::{Handshake, HANDSHAKE_LEN};
-use std::io;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::io::duplex;
-use super::async_impl::{perform_handshake_async, read_from_async, write_to_async};
 
-//! Generic BitTorrent handshake utilities.
-//!
-//! This module provides a small, well-typed representation of the
-//! BitTorrent handshake plus sync and async helper functions that operate
-//! on generic Read/Write and AsyncRead/AsyncWrite streams so it can be
-//! integrated easily with other modules.
+/// Generic BitTorrent handshake utilities.
+///
+/// This module provides a small, well-typed representation of the
+/// BitTorrent handshake plus sync and async helper functions that operate
+/// on generic Read/Write and AsyncRead/AsyncWrite streams so it can be
+/// integrated easily with other modules.
 
 
 /// The canonical protocol string for BitTorrent handshakes.

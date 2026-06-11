@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::str::Bytes;
 use std::time::Duration;
 use std::{fmt, io};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -75,9 +76,11 @@ impl PeerConnection {
         info_hash: [u8; 20],
         local_peer_id: [u8; 20],
     ) -> Result<Self, ConnectionError> {
-        let stream = timeout(IO_TIMEOUT, TcpStream::connect(addr))
-            .await
-            .map_err(|_| ConnectionError::Timeout)??;
+        let stream: TcpStream = match timeout(IO_TIMEOUT, TcpStream::connect(addr)).await {
+            Ok(Ok(stream)) => stream,
+            Ok(Err(e)) => return Err(ConnectionError::Io(e)),
+            Err(_) => return Err(ConnectionError::Timeout),
+        };
 
         let mut conn = PeerConnection {
             stream,
@@ -115,12 +118,9 @@ impl PeerConnection {
     /// - read peer handshake and validate info_hash
     async fn perform_handshake(&mut self) -> Result<(), ConnectionError> {
         // Build handshake struct (details kept in handshake module).
-        let hs = Handshake {
-            info_hash: self.info_hash,
-            peer_id: self.local_peer_id,
-        };
+        let hs = Handshake::new(self.info_hash, self.local_peer_id);
 
-        let out = hs.encode();
+        let out = hs.to_bytes();
 
         // send handshake with timeout
         timeout(IO_TIMEOUT, self.stream.write_all(&out))
@@ -134,7 +134,7 @@ impl PeerConnection {
             .map_err(|_| ConnectionError::Timeout)??;
 
         // parse handshake
-        let peer_hs = Handshake::decode(&buf).map_err(|e| ConnectionError::Handshake(format!("{:?}", e)))?;
+        let peer_hs = Handshake::from_bytes(&buf).map_err(|e| ConnectionError::Handshake(format!("{:?}", e)))?;
 
         // validate info_hash
         if peer_hs.info_hash != self.info_hash {
@@ -147,12 +147,7 @@ impl PeerConnection {
 
     /// Send a message (length-prefixed). A keep-alive is encoded as length 0.
     pub async fn send_message(&mut self, msg: &Message) -> Result<(), ConnectionError> {
-        let payload = msg.encode();
-        // 4 byte big-endian length prefix
-        let len = payload.len() as u32;
-        let mut buf = Vec::with_capacity(4 + payload.len());
-        buf.extend_from_slice(&len.to_be_bytes());
-        buf.extend_from_slice(&payload);
+        let buf = msg.to_bytes();
 
         timeout(IO_TIMEOUT, self.stream.write_all(&buf))
             .await
@@ -180,7 +175,7 @@ impl PeerConnection {
         let len = u32::from_be_bytes(len_buf);
         if len == 0 {
             // keep-alive
-            return Ok(Some(Message::keep_alive()));
+            return Ok(Some(Message::KeepAlive));
         }
 
         let mut payload = vec![0u8; len as usize];
@@ -188,7 +183,13 @@ impl PeerConnection {
             .await
             .map_err(|_| ConnectionError::Timeout)??;
 
-        let msg = Message::decode(&payload).map_err(|e| ConnectionError::Message(format!("{:?}", e)))?;
+        // Reconstruct full message (length prefix + id + payload) for reuse of from_reader
+        let mut full = Vec::with_capacity(4 + payload.len());
+        full.extend_from_slice(&len_buf);
+        full.extend_from_slice(&payload);
+
+        let mut cursor = std::io::Cursor::new(full);
+        let msg = Message::from_reader(&mut cursor).map_err(|e| ConnectionError::Message(format!("{:?}", e)))?;
         Ok(Some(msg))
     }
 

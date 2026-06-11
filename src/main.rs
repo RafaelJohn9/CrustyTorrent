@@ -2,14 +2,16 @@ extern crate clap;
 mod torrent;
 mod tracker;
 mod utils;
-mod storage;
+mod peer;
+// mod storage;
 
 use crate::torrent::{parse_torrent};
 use crate::tracker::udp::udp_announce_from_torrent;
 use crate::utils::sha1::sha1_batch;
-use crate::storage::piece_manager::PieceManager;
+use crate::peer::connection::PeerConnection;
 
 use clap::Parser;
+use tokio;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -19,7 +21,8 @@ struct Args {
     torrent: PathBuf,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = Args::parse();
 
     // Read the torrent file.
@@ -58,6 +61,7 @@ fn main() {
         }
     };
 
+    // Sha1 pieces fingerprints
     let pieces = match &torrent.info.pieces {
         Some(p) => p.as_slice(),
         None => {
@@ -66,11 +70,28 @@ fn main() {
         }
     };
 
-    // Split the concatenated pieces blob into 20-byte chunks (SHA1 hashes)
+    // Split the concatenated pieces blob into 20-byte chunks (SHA1 hashes) for V1 BitTorrent
     let piece_slices: Vec<&[u8]> = pieces.chunks(20).collect();
     let piece_sha1s = sha1_batch(&piece_slices);
 
-    println!("Piece SHA1 hashes: {:#?}", piece_sha1s);
+    // println!("Piece SHA1 hashes: {:#?}", torrent.info);
 
+    // 1. Fetch a piece.
+    // 2. Verify the piece is valid.
+    // 3. Store the piece.
+    // 4. Take a new piece and Repeat.
+
+    // 1. Fetch a piece
+    for peer in &peers {
+        println!("Peer: {}", peer);
+        let peer_connection: PeerConnection = match PeerConnection::connect(*peer, piece_sha1s[0], [0u8; 20]).await {
+            Ok(conn) => conn,
+            Err(e) => {
+                eprintln!("Failed to connect to peer {}: {}", *peer, e);
+                continue;
+            }
+        };
+    }
+    
 
 }
